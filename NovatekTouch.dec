@@ -1,0 +1,36 @@
+[Defines]
+  DEC_SPECIFICATION              = 0x00010005
+  PACKAGE_NAME                   = NovatekTouchPkg
+  PACKAGE_GUID                   = 7a760579-0e6d-400d-a36c-2f957017770e
+  PACKAGE_VERSION                = 0.1
+
+[Guids]
+  gNovatekTouchTokenSpaceGuid = { 0x7a760579, 0x0e6d, 0x400d, { 0xa3, 0x6c, 0x2f, 0x95, 0x70, 0x17, 0x77, 0x0e } }
+
+[Protocols]
+  gNovatekTouchDeviceProtocolGuid = { 0x580ed63f, 0x530d, 0x4d49, { 0x81, 0x56, 0x2b, 0x1a, 0x78, 0xa6, 0x1a, 0xbb } }
+
+[PcdsFixedAtBuild]
+  # Novatek Touch Controller Parameters (Fallback)
+  gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsXNum|18|UINT32|0x00010001
+  gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsYNum|32|UINT32|0x00010002
+  gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsAbsXMax|1080|UINT32|0x00010003
+  gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsAbsYMax|2340|UINT32|0x00010004
+  gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsMaxButtons|0|UINT32|0x00010005
+
+  # Device Configuration (GPIOs, I2C)
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrAddress|0x62|UINT16|0x00010010
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrResetPin|88|UINT32|0x00010011
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrIntPin|89|UINT32|0x00010012
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrI2cDevice|1|UINT32|0x00010013
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddPin|0|UINT32|0x00010014
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddIoPin|0|UINT32|0x00010015
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddPinActiveLow|FALSE|BOOLEAN|0x00010016
+  
+  # Resolution / Orientation
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMinX|0|UINT32|0x00010020
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxX|0|UINT32|0x00010021
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchInvertedX|FALSE|BOOLEAN|0x00010022
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMinY|0|UINT32|0x00010023
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxY|0|UINT32|0x00010024
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchInvertedY|FALSE|BOOLEAN|0x00010025

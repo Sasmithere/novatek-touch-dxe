@@ -1,0 +1,61 @@
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = NovatekNvtTsDeviceDxe
+  FILE_GUID                      = 6b5f9169-8456-4426-9a0c-d5c83d543390
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = NvtDeviceInitialize
+
+[Sources.common]
+  NovatekNvtTsDevice.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  EmbeddedPkg/EmbeddedPkg.dec
+  Silicon/Qualcomm/QcomPkg/QcomPkg.dec
+  Silicon/Qualcomm/QcomPkg/Drivers/NovatekTouchDxe/NovatekTouch.dec
+
+[BuildOptions.AARCH64]
+  GCC:*_*_*_CC_FLAGS = -Werror -Wno-error=unused-variable
+
+[LibraryClasses]
+  ArmLib
+  UefiDriverEntryPoint
+  IoLib
+  TimerLib
+  BaseLib
+  DebugLib
+  PrintLib
+  CompilerIntrinsicsLib
+  CacheMaintenanceLib
+  UefiLib
+
+[Pcd]
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrAddress
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrResetPin
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrIntPin
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrI2cDevice
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddPin
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddIoPin
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddPinActiveLow
+  
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMinX
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxX
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchInvertedX
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMinY
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxY
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchInvertedY
+
+[Protocols]
+  gQcomI2cProtocolGuid
+  gEfiClockProtocolGuid
+  gQcomTlmmProtocolGuid
+  gNovatekTouchDeviceProtocolGuid
+  gEfiDevicePathProtocolGuid
+  gQcomUsbConfigProtocolGuid
+  gEfiClockProtocolGuid
+  gEfiPlatformInfoProtocolGuid
+
+[Depex]
+  gQcomI2cProtocolGuid AND gQcomTlmmProtocolGuid AND gEfiClockProtocolGuid

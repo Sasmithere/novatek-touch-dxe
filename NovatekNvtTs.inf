@@ -1,0 +1,62 @@
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = NovatekNvtTsDxe
+  FILE_GUID                      = 580ed63f-530d-4d49-8156-2b1a78a61abb
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = NvtInitialize
+
+[Sources.common]
+  NovatekNvtTs.c
+  ComponentName.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  ArmPkg/ArmPkg.dec
+  EmbeddedPkg/EmbeddedPkg.dec
+  Silicon/Qualcomm/QcomPkg/QcomPkg.dec
+  Silicon/Qualcomm/QcomPkg/Drivers/NovatekTouchDxe/NovatekTouch.dec
+
+[BuildOptions.AARCH64]
+  GCC:*_*_*_CC_FLAGS = -Werror -Wno-error=unused-variable
+
+[LibraryClasses]
+  ArmLib
+  UefiDriverEntryPoint
+  IoLib
+  TimerLib
+  BaseLib
+  DebugLib
+  DxeServicesTableLib
+  PrintLib
+  CompilerIntrinsicsLib
+  CacheMaintenanceLib
+  UefiLib
+  PcdLib
+
+[Protocols]
+  gQcomI2cProtocolGuid
+  gEfiI2cIoProtocolGuid
+  gEfiClockProtocolGuid
+  gQcomTlmmProtocolGuid
+  gHardwareInterruptProtocolGuid
+  gEfiAbsolutePointerProtocolGuid
+  gNovatekTouchDeviceProtocolGuid
+  gEfiDevicePathProtocolGuid
+  gEfiFirmwareVolume2ProtocolGuid
+
+
+[Pcd]
+  gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsXNum
+  gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsYNum
+  gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsAbsXMax
+  gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsAbsYMax
+  gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsMaxButtons
+
+[Guids]
+  gEfiEventExitBootServicesGuid
+  gEfiFileInfoGuid
+
+[Depex]
+  gNovatekTouchDeviceProtocolGuid
+
