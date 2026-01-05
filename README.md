@@ -25,13 +25,16 @@ Include the driver in your platform's `.dsc` file (e.g., `violet.dsc`) under `[C
 
 ```ini
 [Components.common]
+  Silicon/Qualcomm/QcomPkg/Drivers/NovatekTouchDxe/NovatekNvtTsDevice.inf
   Silicon/Qualcomm/QcomPkg/Drivers/NovatekTouchDxe/NovatekNvtTs.inf
 ```
+The above needs to be in the order as stated , 1st NovatekNvtTsDevice , 2nd NovatekNvtTs
 
 ### 2. Add to Platform FDF
 Include the driver binary in your platform's `.fdf` file (e.g., `violet.fdf`) inside the main Firmware Volume (usually `[FV.FvMain]`):
 
 ```ini
+  INF Silicon/Qualcomm/QcomPkg/Drivers/NovatekTouchDxe/NovatekNvtTsDevice.inf
   INF Silicon/Qualcomm/QcomPkg/Drivers/NovatekTouchDxe/NovatekNvtTs.inf
 ```
 
