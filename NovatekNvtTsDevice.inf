@@ -39,7 +39,6 @@
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddPin
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddIoPin
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddPinActiveLow
-  
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchMinX
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxX
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchInvertedX

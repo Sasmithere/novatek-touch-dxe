@@ -29,8 +29,12 @@
   
   # Resolution / Orientation
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchMinX|0|UINT32|0x00010020
-  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxX|0|UINT32|0x00010021
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxX|1080|UINT32|0x00010021
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchInvertedX|FALSE|BOOLEAN|0x00010022
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchMinY|0|UINT32|0x00010023
-  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxY|0|UINT32|0x00010024
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxY|2340|UINT32|0x00010024
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchInvertedY|FALSE|BOOLEAN|0x00010025
+
+  # GPIOs
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchGpioSda|4|UINT32|0x00010030
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchGpioScl|5|UINT32|0x00010031

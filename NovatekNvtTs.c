@@ -413,9 +413,8 @@ VOID NvtConfigRCG(UINT32 BaseAddr)
 // 0x40 #define SE_GENI_IOS			0x908 #define SE_I2C_STATUS
 // 0x2A4
 // --- SOFTWARE I2C (BIT-BANGING) IMPLEMENTATION ---
-#define PIN_SDA 4
-#define PIN_SCL 5
-
+#define PIN_SDA PcdGet32(PcdNvtTouchGpioSda)
+#define PIN_SCL PcdGet32(PcdNvtTouchGpioScl)
 // Helper to configure GPIO Direction
 // High (1) = Input (Floats High via Pull-up)
 // Low (0) = Output Low (Drive 0)
@@ -807,7 +806,8 @@ EFI_STATUS Nvti2cReadHelper(
 // ---------------------------------------------
 // SOFTWARE I2C IMPLEMENTATION (Bit-Banging)
 // ---------------------------------------------
-// REASON: Hardware I2C (QUP) is inaccessible/unmapped in this environment.
+// REASON: Hardware I2C (QUP) is not always accessible/mapped in this
+// environment.
 
 /**
   Write data to I2C (Address + Reg + Data)
