@@ -1,4 +1,4 @@
-#include <Uefi.h>
+// #include <Uefi.h>
 
 /* READ THIS MAIN !!! don't blame me if something goes wrong
   *******************************************************************************
@@ -62,6 +62,9 @@
 #define I2C_FW_Address 0x01 // Kernel Data Port (Pipe 1)
 #define I2C_HW_Address 0x62 // Hardware Port (Pipe 0)
 
+// Global Variables
+static UINT32 mI2cDelayUs = 5; // Default, updated by PCD/Protocol
+
 // Helper Macros
 #define ABS1(x) ((x) < 0 ? -(x) : (x))
 
@@ -73,14 +76,18 @@
 #include <Library/TimerLib.h>
 
 // --- FORWARD DECLARATIONS ---
-// EFI_STATUS EFIAPI NvtI2cWriteRaw(
-//     IN NVT_INTERNAL_DATA *Instance, IN UINT8 *Data, IN UINT32 Length);
-// EFI_STATUS EFIAPI NvtI2cRead(
-//     IN NVT_INTERNAL_DATA *Instance, IN UINT16 Address, OUT UINT8 *Data,
-//     IN UINT32 Length);
-// EFI_STATUS EFIAPI NvtI2cWrite(
-//     IN NVT_INTERNAL_DATA *Instance, IN UINT16 Address, IN UINT8 *Data,
-//     IN UINT32 Length);
+EFI_STATUS EFIAPI NvtI2cWriteRaw(
+    IN NVT_INTERNAL_DATA *Instance, IN UINT8 *Data, IN UINT32 Length);
+EFI_STATUS EFIAPI NvtI2cRead(
+    IN NVT_INTERNAL_DATA *Instance, IN UINT16 Address, OUT UINT8 *Data,
+    IN UINT32 Length);
+EFI_STATUS EFIAPI NvtI2cWrite(
+    IN NVT_INTERNAL_DATA *Instance, IN UINT16 Address, IN UINT8 *Data,
+    IN UINT32 Length);
+EFI_STATUS EFIAPI
+           NvtSetSlaveAddress(NVT_INTERNAL_DATA *Instance, UINT32 Address);
+EFI_STATUS NvtHardReset(NVT_INTERNAL_DATA *Instance);
+VOID       NvtConfigI2cPins(NVT_INTERNAL_DATA *Instance);
 
 // --- TRIM TABLE & STRUCTS ---
 #define NVT_ID_BYTE_MAX 6
@@ -489,8 +496,8 @@ BOOLEAN SwI2cGetPin(NVT_INTERNAL_DATA *Instance, UINT32 Pin)
 **/
 VOID SwI2cDelay()
 {
-  // Reduced to 1us - High Speed (Optimized with GPIO Cache)
-  MicroSecondDelay(1);
+  // Configurable Delay via Global (Protocol-adjustable)
+  MicroSecondDelay(mI2cDelayUs);
 }
 
 /**
@@ -990,40 +997,9 @@ EFI_STATUS EFIAPI NvtI2cRead(
     IN NVT_INTERNAL_DATA *Instance, IN UINT16 Address, OUT UINT8 *Data,
     IN UINT32 Length)
 {
-  EFI_STATUS Status;
-  UINT32     Retry;
-
-  // Retry logic for Clone ICs (sensitivity to 0xFF)
-  for (Retry = 0; Retry < 3; Retry++) {
-    // Call Helper (Bit-Banging)
-    Status = Nvti2cReadHelper(
-        Instance, Instance->CurrentSlaveAddress, (UINT8)Address, Data, Length);
-
-    if (EFI_ERROR(Status)) {
-      gBS->Stall(250); // Original delay
-      continue;
-    }
-
-    // Verify Read (Check for all 0xFF)
-    BOOLEAN AllFF = TRUE;
-    for (UINT32 i = 0; i < MIN(Length, 6); i++) {
-      if (Data[i] != 0xFF) {
-        AllFF = FALSE;
-        break;
-      }
-    }
-
-    if (!AllFF) {
-      return EFI_SUCCESS; // Success
-    }
-
-    // DEBUG((EFI_D_ERROR, "NVT: I2cRead Retry %d (Data All 0xFF)\n", Retry));
-    gBS->Stall(500); // Longer delay before retry
-  }
-
-  // Return last status even if it was 0xFF success (which is suspicious but
-  // technically success)
-  return Status;
+  // Simplified for OEM-like hardware (No 0xFF checks/retries)
+  return Nvti2cReadHelper(
+      Instance, Instance->CurrentSlaveAddress, (UINT8)Address, Data, Length);
 }
 /**
   Dump GENI SE Registers (Debug)
@@ -1311,7 +1287,9 @@ EFI_STATUS NvtSwitchFreqHopEnDis(NVT_INTERNAL_DATA *Instance, UINT8 OnOff)
     // NvtI2cRead uses Address as Register
     NvtI2cRead(Instance, EVENT_MAP_HOST_CMD, Buf, 2);
 
-    if (Buf[1] == 0x00) {
+    // Check if cleared (Handshake)
+    // Fix: Check Buf[0] as well (Primary Status)
+    if (Buf[0] == 0x00 || Buf[1] == 0x00) {
       DEBUG((EFI_D_ERROR, "NVT: SwitchFreqHop Success (Cleared 0x00).\n"));
       break;
     }
@@ -1319,28 +1297,13 @@ EFI_STATUS NvtSwitchFreqHopEnDis(NVT_INTERNAL_DATA *Instance, UINT8 OnOff)
   }
 
   if (Retry >= 20) {
-    DEBUG((EFI_D_ERROR, "NVT: SwitchFreqHop Timeout! Buf[1]=0x%02X\n", Buf[1]));
+    // This is expected on some panels (Violt/Clone)
+    DEBUG(
+        (EFI_D_INFO,
+         "NVT: FreqHop not acked (Buf[0]=%02X), continuing (Non-Fatal)\n",
+         Buf[0]));
 
-    // Retry Write
-    DEBUG((EFI_D_ERROR, "NVT: Retrying FreqHop Write...\n"));
-    Buf[0] = EVENT_MAP_HOST_CMD;
-    Buf[1] = OnOff;
-    NvtI2cWriteRaw(Instance, Buf, 2);
-    MicroSecondDelay(35000);
-
-    Buf[0] = EVENT_MAP_HOST_CMD;
-    Buf[1] = 0xFF;
-    NvtI2cRead(Instance, EVENT_MAP_HOST_CMD, Buf, 2);
-    if (Buf[1] == 0x00) {
-      DEBUG((EFI_D_ERROR, "NVT: SwitchFreqHop Success (Retry).\n"));
-      return EFI_SUCCESS;
-    }
-    else {
-      DEBUG(
-          (EFI_D_ERROR, "NVT: SwitchFreqHop Failed (Retry) Buf[1]=0x%02X\n",
-           Buf[1]));
-      return EFI_DEVICE_ERROR;
-    }
+    // No Retry - Just exit
   }
   return EFI_SUCCESS;
 }
@@ -1400,27 +1363,35 @@ NvtChangeMode(IN NVT_INTERNAL_DATA *Instance, IN UINT8 Mode)
 // Drain the FIFO to clear any stale touch events (Ghost Touches)
 // Note: Requires POINT_DATA_LEN to be 66 (Kernel length)
 /**
-  Drain Bootloader FIFO
+  Drain FIFO (Normal Mode)
 
   Clears stale data/ghost touches after bootloader operations.
+  Uses I2C_FW_Address and EventBufAddr.
 
   @param Instance    Pointer to driver instance
 **/
-VOID NvtDrainBufferBootloader(NVT_INTERNAL_DATA *Instance)
+VOID NvtDrainFifo(NVT_INTERNAL_DATA *Instance)
 {
   EFI_STATUS Status;
   UINT8      TempBuf[POINT_DATA_LEN];
   UINT32     Retry;
   UINT8      PacketId, LastDrainPid = 0xFF;
 
-  DEBUG((EFI_D_ERROR, "NVT: Draining bootloader buffer...\n"));
+  DEBUG((EFI_D_ERROR, "NVT: Draining FIFO (FW Address)...\n"));
 
-  NvtSetSlaveAddress(Instance, I2C_HW_Address);
+  // Critical: Set Page to Event Buffer Address
+  if (Instance->EventBufAddr == 0) {
+    Instance->EventBufAddr = 0x21C00; // Fallback
+  }
+  NvtSetXdataPage(Instance, Instance->EventBufAddr);
 
-  for (Retry = 0; Retry < 30; Retry++) { // Increased from 20 to 30
+  for (Retry = 0; Retry < 10; Retry++) {
     SetMem(TempBuf, POINT_DATA_LEN, 0xAA);
 
-    Status = NvtI2cRead(Instance, 0x00, TempBuf, POINT_DATA_LEN);
+    // Read from Offset 0x00 (Low byte of EventBufAddr) at FW Address
+    Status = NvtI2cRead(
+        Instance, (UINT8)(Instance->EventBufAddr & 0xFF), TempBuf,
+        POINT_DATA_LEN);
 
     if (EFI_ERROR(Status)) {
       DEBUG((EFI_D_ERROR, "NVT: Drain read failed\n"));
@@ -1436,6 +1407,7 @@ VOID NvtDrainBufferBootloader(NVT_INTERNAL_DATA *Instance)
     // Check if data changed
     BOOLEAN AllSentinel = TRUE;
     for (UINT32 i = 0; i < 8; i++) {
+      // Just check first few bytes to save time
       if (TempBuf[i] != 0xAA) {
         AllSentinel = FALSE;
         break;
@@ -1450,11 +1422,21 @@ VOID NvtDrainBufferBootloader(NVT_INTERNAL_DATA *Instance)
     // Extract packet ID
     PacketId = (TempBuf[0] >> 3) & 0x1F;
 
+    // Check for IDLE Packet ID (0x1F = 31)
+    // If first byte is 0xFF, packet ID becomes 31.
+    // Some chips return 0xFF 0x00 ... (Byte 1 not FF)
+    // So if PID is 31, we assume IDLE.
+    if (PacketId == 0x1F) {
+      DEBUG((EFI_D_ERROR, "NVT: PID 31 (Idle) detected. Buffer Empty.\n"));
+      break;
+    }
+
     // Check if this is a duplicate packet (ghost!)
+    // If we are reading correctly, this shouldn't happen often.
     if (PacketId == LastDrainPid) {
       DEBUG(
           (EFI_D_ERROR, "NVT: Duplicate PID=%d (ghost) - ignored\n", PacketId));
-      gBS->Stall(10000); // Wait longer for new packet
+      gBS->Stall(10000); // Wait
       continue;
     }
 
@@ -1465,7 +1447,9 @@ VOID NvtDrainBufferBootloader(NVT_INTERNAL_DATA *Instance)
 
     // Validate touch status
     if (TouchStatus > 0x02) {
-      DEBUG((EFI_D_ERROR, "NVT: Invalid status=0x%02X (ghost)\n", TouchStatus));
+      // 0x06 (Ghost) check
+      DEBUG(
+          (EFI_D_ERROR, "NVT: Invalid status=0x%02X (ignored)\n", TouchStatus));
       gBS->Stall(5000);
       continue;
     }
@@ -1479,7 +1463,7 @@ VOID NvtDrainBufferBootloader(NVT_INTERNAL_DATA *Instance)
       DEBUG((EFI_D_ERROR, "NVT: Drained release [PID=%d]\n", PacketId));
     }
 
-    gBS->Stall(10000); // 10ms between drain reads (increased from 5ms)
+    gBS->Stall(10000); // 10ms between drain reads
   }
 
   // Reset packet ID tracker after drain
@@ -1733,6 +1717,48 @@ VOID NvtDrainBuffer(NVT_INTERNAL_DATA *Instance)
 
   @retval EFI_SUCCESS        Driver started
 **/
+
+// ==================== PROTOCOL IMPLEMENTATION ====================
+
+EFI_STATUS EFIAPI NvtGetDiagnostics(
+    IN NOVATEK_TOUCH_CONFIG_PROTOCOL *This,
+    OUT NOVATEK_TOUCH_DIAGNOSTICS    *Diagnostics)
+{
+  NVT_INTERNAL_DATA *Instance = NVT_TCH_INSTANCE_FROM_CONFIG_PROTOCOL(This);
+
+  if (Diagnostics == NULL)
+    return EFI_INVALID_PARAMETER;
+
+  Diagnostics->DroppedEvents   = Instance->DroppedEvents;
+  Diagnostics->MaxPollDuration = Instance->MaxPollDuration;
+  Diagnostics->LastPollTime    = Instance->LastPollTime;
+  Diagnostics->I2cRetries      = Instance->I2cRetries;
+  Diagnostics->EventBufAddr    = Instance->EventBufAddr;
+  Diagnostics->CurrentMode     = Instance->CurrentMode;
+  Diagnostics->LastPacketId    = (INT16)Instance->LastPacketId;
+  Diagnostics->FirmwareVersion = Instance->IdInfo.FwVer;
+  Diagnostics->ResolutionX     = Instance->IdInfo.AbsXMax;
+  Diagnostics->ResolutionY     = Instance->IdInfo.AbsYMax;
+
+  return EFI_SUCCESS;
+}
+
+EFI_STATUS EFIAPI
+NvtSetI2cDelay(IN NOVATEK_TOUCH_CONFIG_PROTOCOL *This, IN UINT32 DelayUs)
+{
+  mI2cDelayUs = DelayUs;
+  DEBUG((EFI_D_INFO, "NVT: I2C Delay set to %d us\n", mI2cDelayUs));
+  return EFI_SUCCESS;
+}
+
+EFI_STATUS EFIAPI NvtResetController(IN NOVATEK_TOUCH_CONFIG_PROTOCOL *This)
+{
+  NVT_INTERNAL_DATA *Instance = NVT_TCH_INSTANCE_FROM_CONFIG_PROTOCOL(This);
+  return NvtBootloaderReset(Instance);
+}
+
+// =================================================================
+
 EFI_STATUS EFIAPI NvtAbsolutePointerDriverBindingStart(
     IN EFI_DRIVER_BINDING_PROTOCOL *This, IN EFI_HANDLE Controller,
     IN EFI_DEVICE_PATH_PROTOCOL *RemainingDevicePath)
@@ -1762,6 +1788,7 @@ EFI_STATUS EFIAPI NvtAbsolutePointerDriverBindingStart(
   }
 
   Instance->NvtDevice = NvtDeviceIo;
+  mI2cDelayUs         = PcdGet32(PcdNvtTouchI2cDelayUs); // Init Global Delay
   Instance->Buf       = AllocateZeroPool(POINT_DATA_LEN + 1);
   if (Instance->Buf == NULL) {
     FreePool(Instance);
@@ -1770,6 +1797,8 @@ EFI_STATUS EFIAPI NvtAbsolutePointerDriverBindingStart(
 
   // ===== INITIALIZE DEFAULTS (Safe Fallback) =====
   // Matches "let defaults stay, its safer that way"
+  mI2cDelayUs = PcdGet32(PcdNvtTouchI2cDelayUs); // Init Global Delay
+
   Instance->MemMap       = &NT36672A_memory_map;
   Instance->EventBufAddr = 0x21C00;
   Instance->CurrentMode  = NORMAL_MODE;
@@ -1788,14 +1817,12 @@ EFI_STATUS EFIAPI NvtAbsolutePointerDriverBindingStart(
 
   // ===== GPIO CONFIG =====
   IrqConfig = EFI_GPIO_CFG(
-      Instance->NvtDevice->ControllerInterruptPin, 0, GPIO_INPUT, GPIO_PULL_UP,
-      GPIO_2MA);
+      PcdGet32(PcdNvtTouchGpioIrq), 0, GPIO_INPUT, GPIO_PULL_UP, GPIO_2MA);
   Instance->NvtDevice->GpioTlmmProtocol->ConfigGpio(
       IrqConfig, TLMM_GPIO_ENABLE);
 
   ResetConfig = EFI_GPIO_CFG(
-      Instance->NvtDevice->ControllerResetPin, 0, GPIO_OUTPUT, GPIO_NO_PULL,
-      GPIO_2MA);
+      PcdGet32(PcdNvtTouchGpioRst), 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_2MA);
   Instance->NvtDevice->GpioTlmmProtocol->ConfigGpio(
       ResetConfig, TLMM_GPIO_ENABLE);
 
@@ -1805,9 +1832,31 @@ EFI_STATUS EFIAPI NvtAbsolutePointerDriverBindingStart(
   // ===== CRITICAL: FORCE RESET TO IDLE =====
   // This breaks the CRC reboot loop seen in dmesg
   DEBUG((EFI_D_ERROR, "NVT: Forcing reset to idle (0xA5)...\n"));
-  for (UINT32 retry = 0; retry < 3; retry++) {
+  // ===== CRITICAL: FORCE RESET TO IDLE WITH HANDSHAKE =====
+  // This breaks the CRC reboot loop seen in dmesg
+  DEBUG((EFI_D_ERROR, "NVT: Forcing reset to idle (0xA5) with Handshake...\n"));
+  BOOLEAN HandshakeSuccess = FALSE;
+  for (UINT32 retry = 0; retry < 5; retry++) {
     NvtSwResetIdle(Instance); // Send 0x00 = 0xA5 to address 0x62
     gBS->Stall(20000);        // 20ms
+
+    // Check if FW is ready (0xA0 - Init or higher)
+    // Relaxed from REK_FINISH (0xA2) because chip might be in 0xA1
+    // (Calibration)
+    Status = NvtCheckFwResetState(Instance, RESET_STATE_INIT);
+    if (!EFI_ERROR(Status)) {
+      HandshakeSuccess = TRUE;
+      DEBUG((EFI_D_ERROR, "NVT: Handshake Success (Retry %d)\n", retry));
+      break;
+    }
+
+    DEBUG((
+        EFI_D_ERROR, "NVT: Handshake Failed (Retry %d), Retrying...\n", retry));
+    gBS->Stall(50000); // 50ms wait
+  }
+
+  if (!HandshakeSuccess) {
+    DEBUG((EFI_D_ERROR, "NVT: Handshake failed, proceeding but unstable...\n"));
   }
 
   DEBUG((EFI_D_ERROR, "NVT: Sending Baseline ReK (0xA1)...\n"));
@@ -1819,17 +1868,12 @@ EFI_STATUS EFIAPI NvtAbsolutePointerDriverBindingStart(
   gBS->Stall(100000); // Wait 100ms for recalibration
   DEBUG((EFI_D_ERROR, "NVT: Baseline recalibration complete\n"));
 
-  // ===== FIX: ENABLE FREQUENCY HOPPING (0x65) =====
-  // Fixes I2C noise (0xFF packets) from LCD interference
-  DEBUG((EFI_D_ERROR, "NVT: Enabling Frequency Hopping...\n"));
-  Status = NvtSwitchFreqHopEnDis(Instance, 0x65); // 0x65 = Enable
-  if (EFI_ERROR(Status)) {
-    DEBUG((EFI_D_ERROR, "NVT: FreqHop enable failed (non-fatal)\n"));
-  }
-  gBS->Stall(35000); // 35ms delay
+  // ===== ENABLE FREQUENCY HOPPING (REMOVED FOR TEST) =====
+  // User hypothesis: Jitter was due to IRQ/Packet filtering, not lack of
+  // FreqHop. Testing if we can skip this 35ms delay + log.
+  // NvtSwitchFreqHopEnDis(Instance, 0x65);
+  // gBS->Stall(35000);
 
-  // ===== POWER UP & DETECT =====
-  // 1. Power Up (Resets, Clocks) - calls NvtGetFwInfo internally
   Status = NvtPowerUpController(Instance);
   if (EFI_ERROR(Status)) {
     DEBUG(
@@ -1888,13 +1932,22 @@ EFI_STATUS EFIAPI NvtAbsolutePointerDriverBindingStart(
 
   // ===== DRAIN GHOST TOUCHES FROM BOOTLOADER =====
   DEBUG((EFI_D_ERROR, "NVT: Draining bootloader buffer...\n"));
-  NvtDrainBufferBootloader(Instance);
+  NvtDrainFifo(Instance);
 
   // ===== INSTALL PROTOCOL =====
   Instance->Initialized = TRUE;
-  Status                = gBS->InstallProtocolInterface(
-      &Controller, &gEfiAbsolutePointerProtocolGuid, EFI_NATIVE_INTERFACE,
-      &Instance->AbsPointerProtocol);
+  // ===== INSTALL PROTOCOL =====
+  Instance->Initialized = TRUE;
+
+  // Setup Config Protocol
+  Instance->PointProtocol.GetDiagnostics  = NvtGetDiagnostics;
+  Instance->PointProtocol.SetI2cDelay     = NvtSetI2cDelay;
+  Instance->PointProtocol.ResetController = NvtResetController;
+
+  Status = gBS->InstallMultipleProtocolInterfaces(
+      &Controller, &gEfiAbsolutePointerProtocolGuid,
+      &Instance->AbsPointerProtocol, &gNovatekTouchConfigProtocolGuid,
+      &Instance->PointProtocol, NULL);
 
   if (!EFI_ERROR(Status)) {
     AbsStartPolling(Instance);
@@ -1941,9 +1994,10 @@ NvtAbsolutePointerDriverBindingStop(
 
   Instance = NVT_TCH_INSTANCE_FROM_ABSTCH_THIS(AbsolutePointerProtocol);
 
-  Status = gBS->UninstallProtocolInterface(
+  Status = gBS->UninstallMultipleProtocolInterfaces(
       Controller, &gEfiAbsolutePointerProtocolGuid,
-      &Instance->AbsPointerProtocol);
+      &Instance->AbsPointerProtocol, &gNovatekTouchConfigProtocolGuid,
+      &Instance->PointProtocol, NULL);
   if (EFI_ERROR(Status)) {
     return Status;
   }
@@ -1979,11 +2033,20 @@ EFI_STATUS AbsPReset(
 {
   NVT_INTERNAL_DATA *Instance;
 
-  Instance               = NVT_TCH_INSTANCE_FROM_ABSTCH_THIS(This);
-  Instance->LastX        = 0;
-  Instance->LastY        = 0;
-  Instance->StateChanged = FALSE;
-  Instance->IsTouched    = FALSE;
+  Instance = NVT_TCH_INSTANCE_FROM_ABSTCH_THIS(This);
+
+  // 0. Initialize Watchdog
+  Instance->Watchdog.Active = FALSE;
+  Instance->LastX           = 0;
+  Instance->LastY           = 0;
+  Instance->StateChanged    = FALSE;
+  Instance->IsTouched       = FALSE;
+
+  // 1. Hard Reset (GPIO Toggle) - Ensure Clean State on every Boot
+  NvtHardReset(Instance);
+
+  // 2. I2C Config & Chip Info
+  NvtConfigI2cPins(Instance);
 
   return EFI_SUCCESS;
 }
@@ -2013,22 +2076,6 @@ VOID EFIAPI SyncPollCallback(IN EFI_EVENT Event, IN VOID *Context)
 
   Instance->IsBusy = TRUE;
 
-  // ===== CHECK IRQ GPIO STATE FIRST =====
-  // Only read I2C if IRQ pin is HIGH (indicating new data)
-  // Restored: Prevents "Ghost Touches" from reading idle/updating bus.
-
-  UINT32 IrqConfig = EFI_GPIO_CFG(
-      Instance->NvtDevice->ControllerInterruptPin, 0, GPIO_INPUT, GPIO_PULL_UP,
-      GPIO_2MA);
-
-  Instance->NvtDevice->GpioTlmmProtocol->GpioIn(IrqConfig, &IrqState);
-
-  if (IrqState == 1) {
-    // IRQ is HIGH - no new touch data available
-    Instance->IsBusy = FALSE;
-    return;
-  }
-
   // ===== READ TOUCH DATA =====
   Status = NvtGetTouchData(Instance, &TouchData);
   if (EFI_ERROR(Status)) {
@@ -2053,7 +2100,7 @@ VOID EFIAPI SyncPollCallback(IN EFI_EVENT Event, IN VOID *Context)
       SwI2cInit(Instance);
       NvtSwResetIdle(Instance);
       NvtStopCrcReboot(Instance);
-      NvtDrainBufferBootloader(Instance);
+      NvtDrainFifo(Instance);
 
       Instance->LastPacketId = -1;
       FailureCount           = 0;
@@ -2081,9 +2128,9 @@ VOID EFIAPI SyncPollCallback(IN EFI_EVENT Event, IN VOID *Context)
     Instance->StateChanged = TRUE;
     Instance->IsTouched    = TRUE;
     Instance->StateChanged = TRUE;
-    // DEBUG(
-    //     (EFI_D_ERROR, "NVT: Touch X=%d Y=%d P=%d W=%d\n", Instance->LastX,
-    //      Instance->LastY, TouchData.TouchPressure, TouchData.TouchWidth));
+    DEBUG(
+        (EFI_D_ERROR, "NVT: Touch X=%d Y=%d P=%d W=%d\n", Instance->LastX,
+         Instance->LastY, TouchData.TouchPressure, TouchData.TouchWidth));
   }
   else {
     if (Instance->IsTouched) {
@@ -2147,6 +2194,42 @@ EFI_STATUS AbsPGetState(
   }
 
   Instance = NVT_TCH_INSTANCE_FROM_ABSTCH_THIS(This);
+
+  // Watchdog Logic (5 Seconds)
+  if (Instance->IsTouched) {
+    if (!Instance->Watchdog.Active) {
+      Instance->Watchdog.Active    = TRUE;
+      Instance->Watchdog.StartTick = GetPerformanceCounter();
+      Instance->Watchdog.X         = Instance->LastX;
+      Instance->Watchdog.Y         = Instance->LastY;
+    }
+    else {
+      // RESET Watchdog if coordinates changed (User is moving/dragging)
+      if (Instance->LastX != Instance->Watchdog.X ||
+          Instance->LastY != Instance->Watchdog.Y) {
+        Instance->Watchdog.StartTick = GetPerformanceCounter();
+        Instance->Watchdog.X         = Instance->LastX;
+        Instance->Watchdog.Y         = Instance->LastY;
+      }
+
+      UINT64 CurrentTick = GetPerformanceCounter();
+      UINT64 Delta       = CurrentTick - Instance->Watchdog.StartTick;
+      UINT64 Freq        = GetPerformanceCounterProperties(NULL, NULL);
+
+      // Check if same credentials (stuck?)
+      // If stuck for 5 seconds
+      if (Delta > (Freq * 5)) {
+        DEBUG(
+            (EFI_D_ERROR,
+             "NVT: Watchdog Triggered! Stuck Touch? Resetting...\n"));
+        // Force Reset
+        NvtBootloaderReset(Instance);
+      }
+      else {
+        Instance->Watchdog.Active = FALSE;
+      }
+    }
+  }
   if (!Instance->StateChanged) {
     Status = EFI_NOT_READY;
     goto exit;
@@ -2344,6 +2427,13 @@ EFI_STATUS NvtBootloaderReset(NVT_INTERNAL_DATA *Instance)
 
   DEBUG((EFI_D_ERROR, "NVT: Bootloader reset...\n"));
 
+  DEBUG((EFI_D_ERROR, "NVT: Bootloader reset...\n"));
+
+  // NvtHardReset(Instance); // REMOVED: Only call in Start to avoid runtime
+  // delays
+
+  // ==================== CRITICAL: Use HW address (0x62) ====================
+
   // ==================== CRITICAL: Use HW address (0x62) ====================
   NvtSetSlaveAddress(Instance, I2C_HW_Address); // NOT I2C_FW_Address!
 
@@ -2355,6 +2445,50 @@ EFI_STATUS NvtBootloaderReset(NVT_INTERNAL_DATA *Instance)
   gBS->Stall(35000); // 35ms delay (Matched with Linux for Aftersales support)
 
   DEBUG((EFI_D_ERROR, "NVT: Bootloader reset complete\n"));
+  return EFI_SUCCESS;
+}
+
+/**
+  Perform Hard Reset (GPIO Toggle)
+
+  Toggles the RST Pin (GPIO 88 by default) to physically reset the IC.
+  Essential for ensuring clean state on Warm Boot.
+
+  @param Instance    Pointer to driver instance
+**/
+EFI_STATUS NvtHardReset(NVT_INTERNAL_DATA *Instance)
+{
+  EFI_STATUS Status;
+  UINT32     RstPin;
+
+  // Get RST Pin from PCD
+  RstPin = PcdGet32(PcdNvtTouchGpioRst); // Default 88
+
+  DEBUG((EFI_D_ERROR, "NVT: Hard Reset (GPIO %d)...\n", RstPin));
+
+  // Configure as GPIO Output (Func 0), Pull Down, 2mA
+  // Note: We drive it Low manually, so configuration matters less, but safe to
+  // set.
+  UINT32 Config =
+      EFI_GPIO_CFG(RstPin, 0, GPIO_OUTPUT, GPIO_PULL_DOWN, GPIO_2MA);
+  Status = Instance->NvtDevice->GpioTlmmProtocol->ConfigGpio(
+      Config, TLMM_GPIO_ENABLE);
+  if (EFI_ERROR(Status)) {
+    DEBUG((EFI_D_ERROR, "NVT: Failed to config RST GPIO: %r\n", Status));
+    // Continue anyway? Usually yes.
+  }
+
+  // Drive LOW (Reset Active)
+  Instance->NvtDevice->GpioTlmmProtocol->GpioOut(RstPin, GPIO_LOW_VALUE);
+  gBS->Stall(20000); // Hold for 20ms (Datasheet usually says >10ms)
+
+  // Drive HIGH (Reset Release)
+  Instance->NvtDevice->GpioTlmmProtocol->GpioOut(RstPin, GPIO_HIGH_VALUE);
+
+  // Wait for Boot (Datasheet T_Boot is usually ~50-100ms)
+  gBS->Stall(100000); // 100ms wait for firmware boot
+
+  DEBUG((EFI_D_ERROR, "NVT: Hard Reset complete\n"));
   return EFI_SUCCESS;
 }
 
@@ -2421,26 +2555,37 @@ EFI_STATUS NvtGetFwInfo(NVT_INTERNAL_DATA *Instance)
            Instance->IdInfo.AbsXMax, Instance->IdInfo.AbsYMax));
 
       // Check if Broken (CheckSum mismatch)
-      BOOLEAN ChecksumValid = ((Buf[0] + Buf[1]) == 0xFF);
+      // User reported 0xC0 as valid for their device
+      BOOLEAN ChecksumValid =
+          ((Buf[0] + Buf[1]) == 0xFF) || ((Buf[0] + Buf[1]) == 0xC0);
 
-      // Trust Reported Resolution ONLY if Valid Checksum AND Realistic
-      // Resolution 65535 (0xFFFF) is technically > 0 but wrong. Cap at 10000.
-      if (ChecksumValid && Instance->IdInfo.AbsXMax > 100 &&
-          Instance->IdInfo.AbsXMax < 10000 && Instance->IdInfo.AbsYMax > 100 &&
-          Instance->IdInfo.AbsYMax < 10000) {
+      // Trust Reported Resolution if Valid Checksum OR if result looks
+      // plausible (1080x2340)
+      BOOLEAN ResolutionPlausible =
+          (Instance->IdInfo.AbsXMax == 1080 &&
+           Instance->IdInfo.AbsYMax == 2340);
 
-        DEBUG(
-            (EFI_D_ERROR, "NVT: Using Firmware Reported Resolution: %dx%d\n",
-             Instance->IdInfo.AbsXMax, Instance->IdInfo.AbsYMax));
+      if ((ChecksumValid || ResolutionPlausible) &&
+          Instance->IdInfo.AbsXMax > 100 && Instance->IdInfo.AbsXMax < 10000 &&
+          Instance->IdInfo.AbsYMax > 100 && Instance->IdInfo.AbsYMax < 10000) {
+
+        DEBUG((
+            EFI_D_ERROR,
+            "NVT: Using Firmware Reported Resolution: %dx%d (Checksum: %02X)\n",
+            Instance->IdInfo.AbsXMax, Instance->IdInfo.AbsYMax,
+            (Buf[0] + Buf[1])));
         return EFI_SUCCESS;
       }
 
       DEBUG(
           (EFI_D_ERROR,
-           "NVT: FW info Invalid (Checksum: %d, Res: %dx%d)! Using Defaults.\n",
-           ChecksumValid, Instance->IdInfo.AbsXMax, Instance->IdInfo.AbsYMax));
+           "NVT: FW info Invalid (Checksum: %02X, Res: %dx%d)! Using "
+           "Defaults.\n",
+           (Buf[0] + Buf[1]), Instance->IdInfo.AbsXMax,
+           Instance->IdInfo.AbsYMax));
 
-      if (!ChecksumValid) {
+      // Force defaults if we absolutely can't trust the data
+      if (!ChecksumValid && !ResolutionPlausible) {
         DEBUG(
             (EFI_D_ERROR,
              "NVT: FW info broken & Res Invalid! Using Defaults.\n"));
@@ -2463,7 +2608,7 @@ EFI_STATUS NvtGetFwInfo(NVT_INTERNAL_DATA *Instance)
         return EFI_SUCCESS; // broken but linux ignores this, and so will we
       }
       else {
-        return EFI_SUCCESS; // valid main fw info
+        return EFI_SUCCESS; // valid main fw info (via Plausible Res path)
       }
     }
     gBS->Stall(10000);
@@ -2498,6 +2643,7 @@ NvtCheckFwResetState(NVT_INTERNAL_DATA *Instance, UINT8 ExpectedState)
   // Set slave to FW address
   NvtSetSlaveAddress(Instance, I2C_FW_Address);
 
+  // Linux uses 100 retries @ 10ms = 1000ms timeout
   for (Retry = 0; Retry < 100; Retry++) {
     // Set page to EventBufAddr
     Buf[0] = 0xFF;
@@ -2527,20 +2673,18 @@ NvtCheckFwResetState(NVT_INTERNAL_DATA *Instance, UINT8 ExpectedState)
 
     // Check if expected state reached (Linux logic: >= CheckState && <=
     // RESET_STATE_MAX) Common states: 0xA0 (Init), 0xA2 (Rek Finish), 0xA3 (Rek
-    // Fail)
+    // Fail) NOTE: Linux uses dummy byte, so Buf[0] is dummy, Buf[1] is state.
 
-    // if (Buf[0] == 0x16 && Buf[1] == 0x59) {
-    //   DEBUG((EFI_D_ERROR, "NVT: Met novatek-mp-criteria-5916!\n"));
-    //   return EFI_SUCCESS;
-    // }
-
-    if (Buf[0] >= ExpectedState &&
-        Buf[0] <= 0xAF) { // 0xAF as safe max for Reset States
+    // Check Buf[1] (shifted due to dummy byte)
+    // Also keeping Buf[0] check loosely just in case implementation varies,
+    // but prioritizing the Linux-like offset.
+    if ((Buf[1] >= ExpectedState && Buf[1] <= 0xAF) ||
+        (Buf[0] >= ExpectedState && Buf[0] <= 0xAF)) {
       DEBUG(
           (EFI_D_ERROR,
            "NVT: FW reached state 0x%02X (Expected >= 0x%02X) after %d "
            "retries!\n",
-           Buf[1], ExpectedState, Retry));
+           (Buf[1] >= ExpectedState) ? Buf[1] : Buf[0], ExpectedState, Retry));
       return EFI_SUCCESS;
     }
 
@@ -2548,8 +2692,17 @@ NvtCheckFwResetState(NVT_INTERNAL_DATA *Instance, UINT8 ExpectedState)
     if (Retry % 10 == 0 && Retry > 0) {
       DEBUG(
           (EFI_D_ERROR,
-           "NVT: Still waiting... Current state = 0x%02X (want >= 0x%02X)\n",
-           Buf[0], ExpectedState));
+           "NVT: Still waiting... Current state = 0x%02X/0x%02X (want >= "
+           "0x%02X)\n",
+           Buf[0], Buf[1], ExpectedState));
+
+      // Explicit debug for the logic puzzle
+      DEBUG(
+          (EFI_D_ERROR, "NVT: Debug Check: Is %02X >= %02X? %d\n", Buf[0],
+           ExpectedState, (Buf[0] >= ExpectedState)));
+      DEBUG(
+          (EFI_D_ERROR, "NVT: Debug Check: Is %02X >= %02X? %d\n", Buf[1],
+           ExpectedState, (Buf[1] >= ExpectedState)));
     }
 
     gBS->Stall(10000); // 10ms between checks
@@ -2775,7 +2928,7 @@ NvtPowerUpController(NVT_INTERNAL_DATA *Instance)
   }
 
   // Pin Sanity check
-  ResetLine = Instance->NvtDevice->ControllerResetPin;
+  ResetLine = PcdGet32(PcdNvtTouchGpioRst);
   DEBUG((EFI_D_ERROR, "NVT: Reset GPIO: %d\n", ResetLine));
 
   if (ResetLine <= 0) {
@@ -2942,6 +3095,50 @@ BOOLEAN NvtCheckFirmwareCrash(UINT8 *PointData)
   @retval EFI_NOT_READY         No touch / Filtered / Ghost
   @retval EFI_DEVICE_ERROR      Hardware/Bus Error
 **/
+
+/**
+  Transform touch coordinates based on display rotation.
+
+  @param[in]      Instance  Pointer to driver instance
+  @param[in,out]  X         X coordinate to transform
+  @param[in,out]  Y         Y coordinate to transform
+
+  @retval None
+**/
+VOID NvtTransformCoordinates(
+    IN NVT_INTERNAL_DATA *Instance, IN OUT UINT16 *X, IN OUT UINT16 *Y)
+{
+  UINT8  Rotation = PcdGet8(PcdNvtTouchRotation);
+  UINT16 TempX    = *X;
+  UINT16 TempY    = *Y;
+  UINT16 MaxX     = Instance->AbsPointerMode.AbsoluteMaxX;
+  UINT16 MaxY     = Instance->AbsPointerMode.AbsoluteMaxY;
+
+  switch (Rotation) {
+  case 0: // 0° - No rotation
+    break;
+
+  case 1: // 90° clockwise
+    *X = MaxY - TempY;
+    *Y = TempX;
+    break;
+
+  case 2: // 180°
+    *X = MaxX - TempX;
+    *Y = MaxY - TempY;
+    break;
+
+  case 3: // 270° clockwise (90° counter-clockwise)
+    *X = TempY;
+    *Y = MaxX - TempX;
+    break;
+
+  default:
+    DEBUG((EFI_D_ERROR, "NVT: Invalid rotation value %d\n", Rotation));
+    break;
+  }
+}
+
 EFI_STATUS EFIAPI
 NvtGetTouchData(NVT_INTERNAL_DATA *Instance, IN PTOUCH_DATA DataBuffer)
 {
@@ -2953,17 +3150,32 @@ NvtGetTouchData(NVT_INTERNAL_DATA *Instance, IN PTOUCH_DATA DataBuffer)
   UINT16     ScaledX, ScaledY;
   UINT32     Position = 1; // Linux: position = 1 + 6 * i (for i=0)
 
-  // ===== READ FROM BOOTLOADER =====
-  // Matches Linux: CTP_I2C_READ(..., point_data, 66) -> reads 65 bytes into
-  // point_data[1]
-  NvtSetSlaveAddress(Instance, I2C_HW_Address);
+  // ===== READ FROM FIRMWARE BUFFER (Normal Mode) =====
+  // 1. Set Page to Event Buffer Address
+  if (Instance->EventBufAddr == 0) {
+    Instance->EventBufAddr = 0x21C00;
+  }
+
+  // Strict Linux Alignment: Use Firmware Address (0x01) for Runtime Data
+  NvtSetSlaveAddress(Instance, I2C_FW_Address);
+
+  NvtSetXdataPage(Instance, Instance->EventBufAddr);
+
+  // 2. Read from FW Address (0x01)
+  // Read into Instance->Buf starting at offset 1 to align with logic
+  // (Buf[0] is dummy for I2C read?? No, NvtI2cRead usually handles that)
+  // Linux reads 65 bytes. We will read POINT_DATA_LEN into a temp buf or
+  // Instance->Buf correctly.
+
+  // Let's use Instance->Buf[1] as destination, like before, assuming Buf[0]
+  // irrelevant? Actually, NvtI2cRead (Wrapper) handles the I2C transaction. We
+  // want the data from Offset 0x00 (Low Byte of EventBufAddr)
 
   for (Retry = 0; Retry < 3; Retry++) {
-    SetMem(Instance->Buf, POINT_DATA_LEN + 1, 0x00); // clear all
-
-    // Read 65 bytes (POINT_DATA_LEN) into Buf[1]
-    // Buf[0] remains 0x00 (Dummy/Reg)
-    Status = NvtI2cRead(Instance, 0x00, &Instance->Buf[1], POINT_DATA_LEN);
+    SetMem(Instance->Buf, POINT_DATA_LEN + 1, 0x00);
+    Status = NvtI2cRead(
+        Instance, (UINT8)(Instance->EventBufAddr & 0xFF), &Instance->Buf[1],
+        POINT_DATA_LEN);
 
     if (EFI_ERROR(Status)) {
       gBS->Stall(5000);
@@ -3003,9 +3215,6 @@ NvtGetTouchData(NVT_INTERNAL_DATA *Instance, IN PTOUCH_DATA DataBuffer)
     return EFI_NOT_READY;
   }
 
-  if (PacketId == Instance->LastPacketId) {
-    return EFI_NOT_READY; // Duplicate packet
-  }
   Instance->LastPacketId = PacketId;
 
   // Linux: if ((point_data[position] & 0x07) == 0x01 ...)
@@ -3044,6 +3253,9 @@ NvtGetTouchData(NVT_INTERNAL_DATA *Instance, IN PTOUCH_DATA DataBuffer)
   }
 
   // ===== OUTPUT =====
+  // Transform Coordinates (Rotation)
+  NvtTransformCoordinates(Instance, &RawX, &RawY);
+
   DataBuffer->TouchX        = RawX;
   DataBuffer->TouchY        = RawY;
   DataBuffer->TouchPressure = (UINT16)InputP;
@@ -3244,49 +3456,6 @@ NvtSetThresholdDiff(IN NVT_INTERNAL_DATA *Instance, IN UINT8 Threshold)
 }
 
 /**
-  Enable or disable frequency hopping (for EMI environments)
-
-  @param Instance    Pointer to driver instance
-  @param Enable      TRUE to enable freq hop, FALSE to disable
-
-  @retval EFI_SUCCESS           Freq hop configured
-  @retval EFI_DEVICE_ERROR      I2C communication failed
-**/
-EFI_STATUS
-NvtSetFreqHop(IN NVT_INTERNAL_DATA *Instance, IN BOOLEAN Enable)
-{
-  UINT8      Buf[8];
-  EFI_STATUS Status;
-
-  DEBUG(
-      (EFI_D_ERROR, "Nvt: %a frequency hopping\n",
-       Enable ? "Enabling" : "Disabling"));
-
-  if (Instance->MemMap == NULL) {
-    DEBUG((EFI_D_ERROR, "Nvt: MemMap is NULL! Cannot set freq hop.\n"));
-    return EFI_NOT_READY;
-  }
-
-  // Set XDATA page to EVENT_BUF_ADDR
-  Status = NvtSetXdataPage(Instance, Instance->MemMap->EVENT_BUF_ADDR);
-  if (EFI_ERROR(Status)) {
-    return Status;
-  }
-
-  // Write freq hop command
-  Buf[0] = EVENT_MAP_HOST_CMD;
-  Buf[1] = Enable ? FREQ_HOP_ENABLE : FREQ_HOP_DISABLE;
-  Status = NvtI2cWrite(Instance, I2C_FW_Address, Buf, 2);
-  if (EFI_ERROR(Status)) {
-    DEBUG((EFI_D_ERROR, "Nvt: Freq hop write failed\n"));
-    return Status;
-  }
-
-  Instance->TuningConfig.FreqHopEnabled = Enable;
-  return EFI_SUCCESS;
-}
-
-/**
   Apply all tuning configuration parameters
   Called during initialization after firmware is ready
 
@@ -3330,12 +3499,6 @@ NvtApplyTuningConfig(IN NVT_INTERNAL_DATA *Instance)
       DEBUG((EFI_D_ERROR, "Nvt: Failed to set threshold (non-fatal)\n"));
     }
     gBS->Stall(5000);
-  }
-
-  // Apply frequency hopping
-  Status = NvtSetFreqHop(Instance, Instance->TuningConfig.FreqHopEnabled);
-  if (EFI_ERROR(Status)) {
-    DEBUG((EFI_D_ERROR, "Nvt: Failed to set freq hop (non-fatal)\n"));
   }
 
   DEBUG((EFI_D_ERROR, "Nvt: Tuning configuration applied\n"));

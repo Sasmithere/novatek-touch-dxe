@@ -111,8 +111,8 @@ typedef enum {
 #define TOUCH_DELAY_TO_COMMUNICATE 50000
 #define TOUCH_POWER_RAIL_STABLE_TIME 10000
 
-// 2.5ms = 400Hz polling (25,000 * 100ns = 2.5ms) - Fast Mode
-#define TIMER_INTERVAL_TOUCH_POLL 20000
+// 20ms = 50Hz polling (200,000 * 100ns = 20ms) - Balanced
+#define TIMER_INTERVAL_TOUCH_POLL 200000
 
 typedef struct _TOUCH_DATA {
   UINT16 TouchX;
@@ -172,6 +172,41 @@ typedef struct _NOVATEK_I2C_DEVICE {
 
 #define NVT_DEV_INSTANCE_SIGNATURE SIGNATURE_32('n', 'v', 't', 'd')
 
+// ==================== NEW: Diagnostic Protocol ====================
+
+typedef struct {
+  UINT32 DroppedEvents;
+  UINT32 MaxPollDuration;
+  UINT32 I2cRetries;
+  UINT32 EventBufAddr;
+  UINT8  CurrentMode;
+  INT16  LastPacketId;
+  UINT16 FirmwareVersion;
+  UINT16 ResolutionX;
+  UINT16 ResolutionY;
+  UINT64 LastPollTime;
+} NOVATEK_TOUCH_DIAGNOSTICS;
+
+typedef struct _NOVATEK_TOUCH_CONFIG_PROTOCOL NOVATEK_TOUCH_CONFIG_PROTOCOL;
+
+typedef EFI_STATUS(EFIAPI *NVT_GET_DIAGNOSTICS)(
+    IN NOVATEK_TOUCH_CONFIG_PROTOCOL *This,
+    OUT NOVATEK_TOUCH_DIAGNOSTICS    *Diagnostics);
+
+typedef EFI_STATUS(EFIAPI *NVT_SET_I2C_DELAY)(
+    IN NOVATEK_TOUCH_CONFIG_PROTOCOL *This, IN UINT32 DelayUs);
+
+typedef EFI_STATUS(EFIAPI *NVT_RESET_CONTROLLER)(
+    IN NOVATEK_TOUCH_CONFIG_PROTOCOL *This);
+
+struct _NOVATEK_TOUCH_CONFIG_PROTOCOL {
+  NVT_GET_DIAGNOSTICS  GetDiagnostics;
+  NVT_SET_I2C_DELAY    SetI2cDelay;
+  NVT_RESET_CONTROLLER ResetController;
+};
+
+extern EFI_GUID gNovatekTouchConfigProtocolGuid;
+
 // Novatek driver internals
 typedef struct _NVT_INTERNAL_DATA {
   UINT32 Signature;
@@ -219,11 +254,34 @@ typedef struct _NVT_INTERNAL_DATA {
   // GPIO Cache (Optimization)
   INT32 LastSdaLevel; // -1=Unknown, 0=Low, 1=High
   INT32 LastSclLevel; // -1=Unknown, 0=Low, 1=High
+
+  // ==================== NEW: Diagnostics & Watchdog ====================
+  // Diagnostics
+  UINT32 DroppedEvents;
+  UINT32 MaxPollDuration; // In microseconds
+  UINT64 LastPollTime;
+  UINT32 I2cRetries;
+
+  // Watchdog
+  struct {
+    BOOLEAN Active;
+    UINT64  StartTick;
+    UINT16  X;
+    UINT16  Y;
+  } Watchdog;
+
+  // Protocol Instance
+  NOVATEK_TOUCH_CONFIG_PROTOCOL PointProtocol;
 } NVT_INTERNAL_DATA;
+
+// Protocols moved above
 
 #define NVT_TCH_INSTANCE_SIGNATURE SIGNATURE_32('n', 'v', 't', 's')
 #define NVT_TCH_INSTANCE_FROM_ABSTCH_THIS(a)                                   \
   CR(a, NVT_INTERNAL_DATA, AbsPointerProtocol, NVT_TCH_INSTANCE_SIGNATURE)
+
+#define NVT_TCH_INSTANCE_FROM_CONFIG_PROTOCOL(a)                               \
+  CR(a, NVT_INTERNAL_DATA, PointProtocol, NVT_TCH_INSTANCE_SIGNATURE)
 
 // ==================== Function Declarations ====================
 
@@ -260,8 +318,6 @@ EFI_STATUS NvtConfigureEdgeFilter(
 
 EFI_STATUS
 NvtSetThresholdDiff(IN NVT_INTERNAL_DATA *Instance, IN UINT8 Threshold);
-
-EFI_STATUS NvtSetFreqHop(IN NVT_INTERNAL_DATA *Instance, IN BOOLEAN Enable);
 
 EFI_STATUS NvtApplyTuningConfig(IN NVT_INTERNAL_DATA *Instance);
 

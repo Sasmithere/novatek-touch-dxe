@@ -1,0 +1,30 @@
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = NvtTouchDiag
+  FILE_GUID                      = 11111111-2222-3333-4444-555555555555
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = ShellCEntryLib
+
+[Sources]
+  NvtTouchDiag.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  ShellPkg/ShellPkg.dec
+  Silicon/Qualcomm/QcomPkg/Drivers/NovatekTouchDxe/NovatekTouch.dec
+
+[LibraryClasses]
+  UefiLib
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  DebugLib
+  ShellCEntryLib
+  BaseLib
+
+[Protocols]
+  gNovatekTouchConfigProtocolGuid
+
+[Depex]
+  TRUE

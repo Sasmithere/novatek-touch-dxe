@@ -42,6 +42,7 @@
   gHardwareInterruptProtocolGuid
   gEfiAbsolutePointerProtocolGuid
   gNovatekTouchDeviceProtocolGuid
+  gNovatekTouchConfigProtocolGuid
   gEfiDevicePathProtocolGuid
   gEfiFirmwareVolume2ProtocolGuid
 
@@ -54,6 +55,10 @@
   gNovatekTouchTokenSpaceGuid.PcdNvtTsParamsMaxButtons
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchGpioSda
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchGpioScl
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchGpioIrq
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchGpioRst
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchI2cDelayUs
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchRotation
 
 [Guids]
   gEfiEventExitBootServicesGuid

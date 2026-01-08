@@ -9,6 +9,7 @@
 
 [Protocols]
   gNovatekTouchDeviceProtocolGuid = { 0x580ed63f, 0x530d, 0x4d49, { 0x81, 0x56, 0x2b, 0x1a, 0x78, 0xa6, 0x1a, 0xbb } }
+  gNovatekTouchConfigProtocolGuid = { 0x6e4f3a9b, 0x1d2c, 0x4e5f, { 0x9a, 0x8b, 0x7c, 0x6d, 0x5e, 0x4f, 0x3a, 0x2b } }
 
 [PcdsFixedAtBuild]
   # Novatek Touch Controller Parameters (Fallback)
@@ -27,6 +28,9 @@
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddIoPin|0|UINT32|0x00010015
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchCtlrVddPinActiveLow|FALSE|BOOLEAN|0x00010016
   
+  # I2C Timing
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchI2cDelayUs|5|UINT32|0x00010017
+  
   # Resolution / Orientation
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchMinX|0|UINT32|0x00010020
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxX|1080|UINT32|0x00010021
@@ -34,7 +38,10 @@
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchMinY|0|UINT32|0x00010023
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchMaxY|2340|UINT32|0x00010024
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchInvertedY|FALSE|BOOLEAN|0x00010025
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchRotation|0|UINT8|0x00010026
 
-  # GPIOs
+  # GPIOs (Per-Device Config)
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchGpioSda|4|UINT32|0x00010030
   gNovatekTouchTokenSpaceGuid.PcdNvtTouchGpioScl|5|UINT32|0x00010031
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchGpioIrq|89|UINT32|0x00010032
+  gNovatekTouchTokenSpaceGuid.PcdNvtTouchGpioRst|88|UINT32|0x00010033
