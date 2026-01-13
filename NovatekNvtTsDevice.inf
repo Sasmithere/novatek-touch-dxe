@@ -52,7 +52,6 @@
   gQcomTlmmProtocolGuid
   gNovatekTouchDeviceProtocolGuid
   gEfiDevicePathProtocolGuid
-  gQcomUsbConfigProtocolGuid
   gEfiClockProtocolGuid
   gEfiPlatformInfoProtocolGuid
 
