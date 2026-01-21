@@ -110,4 +110,8 @@ Since this driver uses Software I2C, you **MUST** configure the SDA and SCL GPIO
 the 2nd most important part the "AI" missed here is the clocks required and how they are needed to be tuned properly, check your kernel online if available, or probe your phone using
 adb , read the comments in the driver properly...
 
+there have been issues where touch is not working , trust me the code is working , the thing i found when testing is its the timer, for now the working theory is the timing is set differently
+on different devices, and since the time in the current dxe favours my phone so touch is working properly , you need to find yours by testing, more specifically, its "mI2cDelayUs", so dxe is perfect its
+just a timing issue....
+
 toodles
